@@ -23,6 +23,8 @@ interface CommentAnnotationProps {
   onDismiss: () => void;
   initialText?: string;
   editingDraftId?: string;
+  forceBatch?: boolean;
+  placeholder?: string;
 }
 
 export function CommentAnnotation({
@@ -34,6 +36,8 @@ export function CommentAnnotation({
   onDismiss,
   initialText,
   editingDraftId,
+  forceBatch,
+  placeholder,
 }: CommentAnnotationProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const addDraft = useReviewDraftsStore((s) => s.addDraft);
@@ -44,7 +48,7 @@ export function CommentAnnotation({
   );
 
   const [batch, setBatch] = useState(
-    editingDraftId ? true : initialBatchEnabled,
+    forceBatch ? true : editingDraftId ? true : initialBatchEnabled,
   );
   const [isEmpty, setIsEmpty] = useState(!initialText?.trim());
 
@@ -64,9 +68,9 @@ export function CommentAnnotation({
   );
 
   useEffect(() => {
-    if (editingDraftId) return;
+    if (editingDraftId || forceBatch) return;
     setBatch(initialBatchEnabled);
-  }, [initialBatchEnabled, editingDraftId]);
+  }, [initialBatchEnabled, editingDraftId, forceBatch]);
 
   const handleSubmit = useCallback(() => {
     const text = textareaRef.current?.value?.trim();
@@ -131,7 +135,7 @@ export function CommentAnnotation({
       <InputGroup>
         <InputGroupTextarea
           ref={setTextareaRef}
-          placeholder="Describe the changes you'd like..."
+          placeholder={placeholder ?? "Describe the changes you'd like..."}
           onKeyDown={handleKeyDown}
           onChange={(e) => setIsEmpty(!e.currentTarget.value.trim())}
           className="min-h-[48px] resize-none text-[13px]"
@@ -148,7 +152,7 @@ export function CommentAnnotation({
             </InputGroupButton>
           </Tooltip>
           <div className="ml-auto flex items-center gap-3">
-            {!editingDraftId && (
+            {!editingDraftId && !forceBatch && (
               <Text as="label" size="1" color="gray">
                 <span className="flex cursor-pointer items-center gap-2">
                   <Checkbox

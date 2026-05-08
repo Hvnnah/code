@@ -29,6 +29,7 @@ import {
   isJsonRpcNotification,
   isJsonRpcResponse,
 } from "@shared/types/session-events";
+import { usePlanFullscreenStore } from "@stores/planFullscreenStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionService } from "../service/service";
 import { flattenSelectOptions } from "../stores/sessionStore";
@@ -271,6 +272,13 @@ export function SessionView({
     const [toolCallId, permission] = entries[0];
     return { ...permission, toolCallId };
   }, [pendingPermissions]);
+
+  const planFullscreenToolCallId = usePlanFullscreenStore(
+    (s) => s.activeFullscreenToolCallId,
+  );
+  const isPlanOverlayActiveForPermission =
+    !!firstPendingPermission &&
+    firstPendingPermission.toolCallId === planFullscreenToolCallId;
 
   const handlePermissionSelect = useCallback(
     async (
@@ -580,7 +588,8 @@ export function SessionView({
                       )}
                     </Flex>
                   </Flex>
-                ) : hideInput ? null : firstPendingPermission ? (
+                ) : hideInput ||
+                  isPlanOverlayActiveForPermission ? null : firstPendingPermission ? (
                   <Box className="max-h-1/2 min-h-0 overflow-y-auto border-gray-4 border-t">
                     <Box
                       className={compact ? "p-1" : "mx-auto p-2"}
