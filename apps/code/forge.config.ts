@@ -8,6 +8,7 @@ import { MakerZIP } from "@electron-forge/maker-zip";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { PublisherGithub } from "@electron-forge/publisher-github";
 import type { ForgeConfig } from "@electron-forge/shared-types";
+import { MakerAppImage } from "@reforged/maker-appimage";
 
 const appleCodesignIdentity = process.env.APPLE_CODESIGN_IDENTITY;
 const appleTeamId = process.env.APPLE_TEAM_ID;
@@ -193,6 +194,13 @@ const config: ForgeConfig = {
       name: "PostHogCode",
       setupIcon: "./build/app-icon.ico",
     }),
+    new MakerAppImage({
+      options: {
+        icon: "./build/app-icon.png",
+        categories: ["Development"],
+        bin: "PostHog Code",
+      },
+    }),
     new MakerZIP({}, ["darwin", "linux"]),
   ],
   hooks: {
@@ -247,6 +255,12 @@ const config: ForgeConfig = {
           process.arch === "arm64"
             ? "@parcel/watcher-win32-arm64"
             : "@parcel/watcher-win32-x64";
+        copyNativeDependency(watcherPkg, buildPath);
+      } else if (process.platform === "linux") {
+        const watcherPkg =
+          process.arch === "arm64"
+            ? "@parcel/watcher-linux-arm64-glibc"
+            : "@parcel/watcher-linux-x64-glibc";
         copyNativeDependency(watcherPkg, buildPath);
       }
 
