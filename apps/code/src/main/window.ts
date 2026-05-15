@@ -168,14 +168,16 @@ export function createWindow(): void {
           titleBarStyle: "hiddenInset" as const,
           trafficLightPosition: { x: 12, y: 9 },
         }
-      : {
-          titleBarStyle: "hidden" as const,
-          titleBarOverlay: {
-            color: "#0a0a0a",
-            symbolColor: "#ffffff",
-            height: 36,
-          },
-        };
+      : process.platform === "win32"
+        ? {
+            titleBarStyle: "hidden" as const,
+            titleBarOverlay: {
+              color: "#0a0a0a",
+              symbolColor: "#ffffff",
+              height: 36,
+            },
+          }
+        : {};
 
   mainWindow = new BrowserWindow({
     ...(savedState.x !== undefined && { x: savedState.x }),
