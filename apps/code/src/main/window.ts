@@ -179,6 +179,14 @@ export function createWindow(): void {
           }
         : {};
 
+  // macOS uses the .app bundle icon, but Linux/Windows need an explicit icon
+  const windowIcon =
+    process.platform !== "darwin"
+      ? app.isPackaged
+        ? path.join(process.resourcesPath, "app-icon.png")
+        : path.join(app.getAppPath(), "build/app-icon.png")
+      : undefined;
+
   mainWindow = new BrowserWindow({
     ...(savedState.x !== undefined && { x: savedState.x }),
     ...(savedState.y !== undefined && { y: savedState.y }),
@@ -187,6 +195,7 @@ export function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: "#0a0a0a",
+    ...(windowIcon ? { icon: windowIcon } : {}),
     ...platformWindowConfig,
     show: false,
     webPreferences: {

@@ -30,6 +30,7 @@ COPYFILE_DISABLE=1 tar -cf - \
   --exclude='.DS_Store' \
   . | exec docker run --rm -i \
     --platform "$DOCKER_PLATFORM" \
+    --name build-linux \
     -e CI=true \
     -e NODE_OPTIONS="--max-old-space-size=8192" \
     -e NODE_ENV=production \
