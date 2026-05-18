@@ -3127,11 +3127,13 @@ export class SessionService {
 
     const previousErrorTitle = session.errorTitle;
     const previousErrorMessage = session.errorMessage;
+    const previousErrorRetryable = session.errorRetryable;
 
     sessionStoreSetters.updateSession(session.taskRunId, {
       status: "disconnected",
       errorTitle: undefined,
       errorMessage: undefined,
+      errorRetryable: undefined,
       isPromptPending: false,
     });
 
@@ -3145,6 +3147,7 @@ export class SessionService {
         status: "error",
         errorTitle: previousErrorTitle,
         errorMessage: previousErrorMessage,
+        errorRetryable: previousErrorRetryable,
       });
       throw error;
     }
@@ -3170,6 +3173,7 @@ export class SessionService {
         errorMessage:
           update.errorMessage ??
           "Lost connection to the cloud run. Retry to reconnect.",
+        errorRetryable: update.retryable,
         isPromptPending: false,
       });
       return;
