@@ -12,7 +12,6 @@ export function createCommandMention(options: CommandMentionOptions) {
     name: "commandMention",
     char: "/",
     chipType: "command",
-    startOfLine: true,
     items: (query) =>
       sessionId ? getCommandSuggestions(sessionId, query) : [],
   });
