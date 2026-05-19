@@ -83,67 +83,78 @@ function resetStores() {
   });
 }
 
+interface Scenario {
+  name: string;
+  contextTaskId?: string;
+  sessionCommands?: { name: string; description: string }[];
+  draftCommands?: { name: string; description: string }[];
+  expectContains: string[];
+  expectNotContains?: string[];
+}
+
+const SCENARIOS: Scenario[] = [
+  {
+    name: "built-ins are always present",
+    expectContains: ["good", "bad", "feedback"],
+  },
+  {
+    name: "agent-supplied skills surface from session events",
+    contextTaskId: TASK_ID,
+    sessionCommands: [
+      { name: "review", description: "Review code" },
+      { name: "ship-it", description: "Ship the change" },
+    ],
+    expectContains: ["review", "ship-it"],
+  },
+  {
+    name: "falls back to draft-store skills when session has no commands_update yet",
+    contextTaskId: TASK_ID,
+    draftCommands: [{ name: "review", description: "Review code" }],
+    expectContains: ["review"],
+  },
+  {
+    name: "agent-supplied commands win over draft-store fallback once reported",
+    contextTaskId: TASK_ID,
+    draftCommands: [
+      { name: "fallback-only", description: "Should not appear" },
+    ],
+    sessionCommands: [{ name: "agent-cmd", description: "From agent" }],
+    expectContains: ["agent-cmd"],
+    expectNotContains: ["fallback-only"],
+  },
+  {
+    name: "uses draft-store skills when there is no running task",
+    draftCommands: [{ name: "my-skill", description: "User skill" }],
+    expectContains: ["my-skill"],
+  },
+];
+
 describe("getCommandSuggestions", () => {
   beforeEach(resetStores);
 
-  it("returns built-in /good /bad /feedback commands when nothing else is available", () => {
-    const suggestions = getCommandSuggestions(SESSION_ID, "");
-    const names = suggestions.map((s) => s.command.name);
-    expect(names).toContain("good");
-    expect(names).toContain("bad");
-    expect(names).toContain("feedback");
-  });
+  it.each(SCENARIOS)(
+    "$name",
+    ({
+      contextTaskId,
+      sessionCommands,
+      draftCommands,
+      expectContains,
+      expectNotContains,
+    }) => {
+      if (contextTaskId) seedSessionContext(contextTaskId);
+      if (draftCommands) seedDraftCommands(draftCommands);
+      if (sessionCommands) seedSessionAvailableCommands(sessionCommands);
 
-  it("includes agent-supplied skills from session events when available", () => {
-    seedSessionContext(TASK_ID);
-    seedSessionAvailableCommands([
-      { name: "review", description: "Review code" },
-      { name: "ship-it", description: "Ship the change" },
-    ]);
+      const names = getCommandSuggestions(SESSION_ID, "").map(
+        (s) => s.command.name,
+      );
 
-    const names = getCommandSuggestions(SESSION_ID, "").map(
-      (s) => s.command.name,
-    );
-
-    expect(names).toEqual(expect.arrayContaining(["review", "ship-it"]));
-  });
-
-  it("falls back to draft-store skills when the session has no available_commands_update yet", () => {
-    // Running task whose agent hasn't sent commands yet.
-    seedSessionContext(TASK_ID);
-    seedDraftCommands([{ name: "review", description: "Review code" }]);
-
-    const names = getCommandSuggestions(SESSION_ID, "").map(
-      (s) => s.command.name,
-    );
-
-    expect(names).toContain("review");
-  });
-
-  it("prefers agent-supplied commands over draft-store fallback once the session reports them", () => {
-    seedSessionContext(TASK_ID);
-    seedDraftCommands([
-      { name: "fallback-only", description: "Should not appear" },
-    ]);
-    seedSessionAvailableCommands([
-      { name: "agent-cmd", description: "From agent" },
-    ]);
-
-    const names = getCommandSuggestions(SESSION_ID, "").map(
-      (s) => s.command.name,
-    );
-
-    expect(names).toContain("agent-cmd");
-    expect(names).not.toContain("fallback-only");
-  });
-
-  it("uses draft-store skills when there is no running task", () => {
-    seedDraftCommands([{ name: "my-skill", description: "User skill" }]);
-
-    const names = getCommandSuggestions(SESSION_ID, "").map(
-      (s) => s.command.name,
-    );
-
-    expect(names).toContain("my-skill");
-  });
+      for (const expected of expectContains) {
+        expect(names).toContain(expected);
+      }
+      for (const unexpected of expectNotContains ?? []) {
+        expect(names).not.toContain(unexpected);
+      }
+    },
+  );
 });
