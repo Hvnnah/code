@@ -42,6 +42,7 @@ import type {
   GitCheckpointEvent,
   HandoffLocalGitState,
   LogLevel,
+  Task,
   TaskRun,
   TaskRunArtifact,
 } from "../types";
@@ -833,7 +834,10 @@ export class AgentServer {
       }),
     ]);
 
-    this.configureEnvironment({ isInternal: preTask?.internal === true });
+    this.configureEnvironment({
+      isInternal: preTask?.internal === true,
+      originProduct: preTask?.origin_product,
+    });
 
     const prUrl = getTaskRunStateString(preTaskRun, "slack_notified_pr_url");
 
@@ -1785,13 +1789,18 @@ ${attributionInstructions}
 
   private configureEnvironment({
     isInternal = false,
+    originProduct,
   }: {
     isInternal?: boolean;
+    originProduct?: Task["origin_product"] | null;
   } = {}): void {
     const { apiKey, apiUrl, projectId } = this.config;
-    const product: GatewayProduct = isInternal
-      ? "background_agents"
-      : "posthog_code";
+    const product: GatewayProduct =
+      originProduct === "slack"
+        ? "slack_app"
+        : isInternal
+          ? "background_agents"
+          : "posthog_code";
     const gatewayUrl =
       process.env.LLM_GATEWAY_URL || getLlmGatewayUrl(apiUrl, product);
     const openaiBaseUrl = gatewayUrl.endsWith("/v1")

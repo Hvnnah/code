@@ -1,4 +1,4 @@
-export type GatewayProduct = "posthog_code" | "background_agents";
+export type GatewayProduct = "posthog_code" | "background_agents" | "slack_app";
 
 function getGatewayBaseUrl(posthogHost: string): string {
   const url = new URL(posthogHost);
