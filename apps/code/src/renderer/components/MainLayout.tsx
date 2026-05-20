@@ -135,7 +135,7 @@ export function MainLayout() {
   }, [toggleCommandMenu]);
 
   return (
-    <Flex direction="column" height="100vh">
+    <Flex direction="column" height="100%">
       <HeaderRow />
       <Flex flexGrow="1" overflow="hidden">
         <MainSidebar />
