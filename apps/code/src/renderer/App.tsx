@@ -13,7 +13,7 @@ import {
 import { useAuthSession } from "@features/auth/hooks/useAuthSession";
 import { useIsOrgAdmin } from "@features/auth/hooks/useOrgRole";
 import { DevToolbar } from "@features/dev-toolbar/components/DevToolbar";
-import { installMainThreadHealth } from "@features/dev-toolbar/mainThreadHealth";
+import { useDevToolbarIntegration } from "@features/dev-toolbar/integration";
 import { AddDirectoryDialog } from "@features/folder-picker/components/AddDirectoryDialog";
 import { OnboardingFlow } from "@features/onboarding/components/OnboardingFlow";
 import { useOnboardingStore } from "@features/onboarding/stores/onboardingStore";
@@ -70,21 +70,7 @@ function App() {
     return initializeUpdateStore();
   }, []);
 
-  // Install main-thread health observers (longtasks + FPS) for the dev toolbar.
-  useEffect(() => installMainThreadHealth(), []);
-
-  // Surface dev-toolbar triggered toasts (e.g. quick actions test toasts).
-  useSubscription(
-    trpcReact.dev.onDevToast.subscriptionOptions(undefined, {
-      onData: (data) => {
-        if (data.variant === "error") {
-          toast.error(data.message);
-        } else {
-          toast.info(data.message);
-        }
-      },
-    }),
-  );
+  useDevToolbarIntegration();
 
   // Dev-only inbox demo command for local QA from the renderer console.
   useEffect(() => {
