@@ -44,6 +44,8 @@ import {
   POSTHOG_METHODS,
   POSTHOG_NOTIFICATIONS,
 } from "../../acp-extensions";
+import { defaultAddOnRegistry } from "../../add-ons/default-registry";
+import type { AddOnConfig, AddOnContribution } from "../../add-ons/types";
 import {
   createEnrichment,
   type Enrichment,
@@ -100,6 +102,13 @@ interface NewSessionMeta {
   disableBuiltInTools?: boolean;
   allowedDomains?: string[];
   jsonSchema?: Record<string, unknown> | null;
+  /**
+   * Add-on configuration sourced from `task.options.add_ons`. Only the
+   * `systemPromptAppend` slot is honored on Codex today; add-ons that
+   * require `preToolUse`/`postToolUse` hooks declare
+   * `supportedAdapters: ["claude"]` and are skipped here.
+   */
+  addOns?: AddOnConfig;
 }
 
 export interface CodexAcpAgentOptions {
@@ -338,7 +347,12 @@ export class CodexAcpAgent extends BaseAcpAgent {
     const meta = params._meta as NewSessionMeta | undefined;
     const requestedPermissionMode = toCodexPermissionMode(meta?.permissionMode);
 
-    const injectedParams = this.applyStructuredOutput(params, meta);
+    const addOnContribution = await this.collectAddOnContribution(
+      meta?.addOns,
+      params.cwd,
+    );
+    const withAddOns = this.applyAddOnContribution(params, addOnContribution);
+    const injectedParams = this.applyStructuredOutput(withAddOns, meta);
     const response = await this.codexConnection.newSession(injectedParams);
     response.configOptions = normalizeCodexConfigOptions(
       response.configOptions,
@@ -380,7 +394,12 @@ export class CodexAcpAgent extends BaseAcpAgent {
 
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
     const meta = params._meta as NewSessionMeta | undefined;
-    const injectedParams = this.applyStructuredOutput(params, meta);
+    const addOnContribution = await this.collectAddOnContribution(
+      meta?.addOns,
+      params.cwd,
+    );
+    const withAddOns = this.applyAddOnContribution(params, addOnContribution);
+    const injectedParams = this.applyStructuredOutput(withAddOns, meta);
     const response = await this.codexConnection.loadSession(injectedParams);
     response.configOptions = normalizeCodexConfigOptions(
       response.configOptions,
@@ -418,15 +437,20 @@ export class CodexAcpAgent extends BaseAcpAgent {
     params: ResumeSessionRequest,
   ): Promise<ResumeSessionResponse> {
     const meta = params._meta as NewSessionMeta | undefined;
-    const injectedParams = this.applyStructuredOutput(
+    const addOnContribution = await this.collectAddOnContribution(
+      meta?.addOns,
+      params.cwd,
+    );
+    const withAddOns = this.applyAddOnContribution(
       {
         sessionId: params.sessionId,
         cwd: params.cwd,
         mcpServers: params.mcpServers ?? [],
         _meta: params._meta,
       },
-      meta,
+      addOnContribution,
     );
+    const injectedParams = this.applyStructuredOutput(withAddOns, meta);
 
     // codex-acp doesn't support resume natively, use loadSession instead
     const loadResponse = await this.codexConnection.loadSession(injectedParams);
@@ -465,14 +489,19 @@ export class CodexAcpAgent extends BaseAcpAgent {
     params: ForkSessionRequest,
   ): Promise<ForkSessionResponse> {
     const meta = params._meta as NewSessionMeta | undefined;
-    const injectedParams = this.applyStructuredOutput(
+    const addOnContribution = await this.collectAddOnContribution(
+      meta?.addOns,
+      params.cwd,
+    );
+    const withAddOns = this.applyAddOnContribution(
       {
         cwd: params.cwd,
         mcpServers: params.mcpServers ?? [],
         _meta: params._meta,
       },
-      meta,
+      addOnContribution,
     );
+    const injectedParams = this.applyStructuredOutput(withAddOns, meta);
 
     // Create a new session via codex-acp (fork isn't natively supported)
     const newResponse = await this.codexConnection.newSession(injectedParams);
@@ -497,6 +526,59 @@ export class CodexAcpAgent extends BaseAcpAgent {
     );
 
     return newResponse;
+  }
+
+  /**
+   * Resolve the add-on contribution for this session. Add-ons that declare
+   * `supportedAdapters: ["claude"]` (like ztk) are silently skipped here —
+   * `preToolUse`/`postToolUse` slots they would emit have no Codex equivalent.
+   */
+  private collectAddOnContribution(
+    addOns: AddOnConfig | undefined,
+    cwd: string,
+  ): Promise<AddOnContribution> {
+    return defaultAddOnRegistry.collect(addOns, {
+      cwd,
+      adapter: "codex",
+      logger: this.logger,
+    });
+  }
+
+  /**
+   * Apply the supported slots of an add-on contribution to an outbound ACP
+   * session request: `systemPromptAppend` is appended to `_meta.systemPrompt`.
+   * `env` is ignored because the `codex-acp` subprocess has already been
+   * spawned with its environment fixed; add-ons that need env vars in Codex
+   * must declare themselves Claude-only.
+   */
+  private applyAddOnContribution<T extends { _meta?: unknown }>(
+    request: T,
+    contribution: AddOnContribution,
+  ): T {
+    if (!contribution.systemPromptAppend && !contribution.env) {
+      return request;
+    }
+    if (contribution.env) {
+      this.logger.warn(
+        "Add-on contributed env vars but Codex env is fixed at spawn — ignoring",
+        { keys: Object.keys(contribution.env) },
+      );
+    }
+    if (!contribution.systemPromptAppend) {
+      return request;
+    }
+    const existingMeta = (request._meta ?? {}) as Record<string, unknown>;
+    const existingSystemPrompt =
+      typeof existingMeta.systemPrompt === "string"
+        ? existingMeta.systemPrompt
+        : "";
+    return {
+      ...request,
+      _meta: {
+        ...existingMeta,
+        systemPrompt: existingSystemPrompt + contribution.systemPromptAppend,
+      },
+    };
   }
 
   /**
