@@ -1,6 +1,8 @@
+import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { CreateGitClientOptions } from "./client";
+import { mapWithConcurrency } from "./concurrency";
 import { getGitOperationManager } from "./operation-manager";
 import { streamGitStatus } from "./status-stream";
 
@@ -371,10 +373,89 @@ export async function getAllBranches(
     baseDir,
     async (git) => {
       try {
-        const summary = await git.branchLocal();
-        return summary.all;
+        // Use `for-each-ref` rather than `branch --list` (via simple-git's
+        // branchLocal()): during a rebase or cherry-pick git surfaces a
+        // pseudo-branch like `(no branch, rebasing main)` which simple-git's
+        // parser mistakenly returns as a branch named `(no`.
+        const output = await git.raw([
+          "for-each-ref",
+          "--format=%(refname:short)",
+          "refs/heads/",
+        ]);
+        return output.split("\n").filter(Boolean);
       } catch {
         return [];
+      }
+    },
+    { signal: options?.abortSignal },
+  );
+}
+
+export type GitBusyOperation = "rebase" | "merge" | "cherry-pick" | "revert";
+
+export type GitBusyState =
+  | { busy: false }
+  | { busy: true; operation: GitBusyOperation };
+
+export async function inspectGitBusyState(git: GitLike): Promise<GitBusyState> {
+  const toplevel = (await git.raw(["rev-parse", "--show-toplevel"])).trim();
+
+  const resolveGitPath = async (gitPath: string): Promise<string> => {
+    const relative = (
+      await git.raw(["rev-parse", "--git-path", gitPath])
+    ).trim();
+    return path.isAbsolute(relative)
+      ? relative
+      : path.resolve(toplevel, relative);
+  };
+
+  const pathExists = async (gitPath: string): Promise<boolean> => {
+    const resolved = await resolveGitPath(gitPath);
+    try {
+      await fs.access(resolved);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const dirExists = async (gitPath: string): Promise<boolean> => {
+    const resolved = await resolveGitPath(gitPath);
+    try {
+      const stat = await fs.stat(resolved);
+      return stat.isDirectory();
+    } catch {
+      return false;
+    }
+  };
+
+  if ((await dirExists("rebase-merge")) || (await dirExists("rebase-apply"))) {
+    return { busy: true, operation: "rebase" };
+  }
+  if (await pathExists("MERGE_HEAD")) {
+    return { busy: true, operation: "merge" };
+  }
+  if (await pathExists("CHERRY_PICK_HEAD")) {
+    return { busy: true, operation: "cherry-pick" };
+  }
+  if (await pathExists("REVERT_HEAD")) {
+    return { busy: true, operation: "revert" };
+  }
+  return { busy: false };
+}
+
+export async function getGitBusyState(
+  baseDir: string,
+  options?: CreateGitClientOptions,
+): Promise<GitBusyState> {
+  const manager = getGitOperationManager();
+  return manager.executeRead(
+    baseDir,
+    async (git) => {
+      try {
+        return await inspectGitBusyState(git);
+      } catch {
+        return { busy: false };
       }
     },
     { signal: options?.abortSignal },
@@ -413,34 +494,58 @@ function matchesExcludePattern(filePath: string, patterns: string[]): boolean {
   });
 }
 
-async function countFileLines(filePath: string): Promise<number> {
+async function countFileLines(
+  filePath: string,
+  options?: { signal?: AbortSignal },
+): Promise<number> {
   try {
-    const content = await fs.readFile(filePath, "utf-8");
-    if (!content) return 0;
-    return content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
+    // `lstat` instead of `stat` so an untracked symlink (rare, but legal)
+    // pointing at /dev/zero or a path outside the workdir doesn't stream
+    // forever — symlinks fail `isFile()` and short-circuit to 0.
+    const stat = await fs.lstat(filePath);
+    if (!stat.isFile() || stat.size === 0) return 0;
+    return await new Promise<number>((resolve) => {
+      let newlines = 0;
+      let lastByte = -1;
+      const stream = createReadStream(filePath, { signal: options?.signal });
+      stream.on("data", (rawChunk) => {
+        // Node types stream chunks as `string | Buffer`; without an
+        // `encoding` option `createReadStream` always emits `Buffer`,
+        // so the cast is for the type checker, not the runtime.
+        const chunk = rawChunk as Buffer;
+        // Native `Buffer.indexOf` — ~10x faster than a per-byte JS loop
+        // on multi-MB buffers, which is the workload this whole function
+        // exists to handle.
+        for (
+          let idx = chunk.indexOf(0x0a);
+          idx !== -1;
+          idx = chunk.indexOf(0x0a, idx + 1)
+        ) {
+          newlines++;
+        }
+        if (chunk.length > 0) lastByte = chunk[chunk.length - 1];
+      });
+      stream.on("end", () => {
+        // Guards against TOCTOU truncation between lstat and read —
+        // size > 0 at stat time, zero bytes by the time we open.
+        if (lastByte === -1) {
+          resolve(0);
+          return;
+        }
+        resolve(lastByte === 0x0a ? newlines : newlines + 1);
+      });
+      stream.on("error", (err) => {
+        // Don't propagate — caller already treats any failure as 0 lines.
+        // But log so the next time a "shows 0 lines" mystery shows up
+        // there's a breadcrumb (the original OOM in #2218 hid behind the
+        // same silent-zero return).
+        console.warn(`countFileLines failed for ${filePath}:`, err);
+        resolve(0);
+      });
+    });
   } catch {
     return 0;
   }
-}
-
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<R>,
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  let index = 0;
-  const worker = async () => {
-    while (index < items.length) {
-      const i = index++;
-      results[i] = await mapper(items[i]);
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  );
-  return results;
 }
 
 export async function getChangedFilesDetailed(
@@ -521,7 +626,11 @@ export async function getChangedFilesDetailed(
         const untrackedLineCounts = await mapWithConcurrency(
           untrackedToCount,
           16,
-          (file) => countFileLines(path.join(baseDir, file)),
+          (file) =>
+            countFileLines(path.join(baseDir, file), {
+              signal: gitOptions?.abortSignal,
+            }),
+          { signal: gitOptions?.abortSignal },
         );
         for (let i = 0; i < untrackedToCount.length; i++) {
           files.push({
