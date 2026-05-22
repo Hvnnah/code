@@ -44,4 +44,22 @@ describe("buildDiscussReportPrompt", () => {
     });
     expect(prompt).toContain("brief readout");
   });
+
+  it("appends a slugified title suffix to the deep link", () => {
+    const prompt = buildDiscussReportPrompt({
+      reportId: "abc123",
+      reportTitle: "fix(inbox): Add foo",
+      isDevBuild: false,
+    });
+    expect(prompt).toContain("posthog-code://inbox/abc123/fix-inbox--Add-foo");
+  });
+
+  it("omits the slug suffix when the title is blank", () => {
+    const prompt = buildDiscussReportPrompt({
+      reportId: "abc123",
+      reportTitle: "   ",
+      isDevBuild: false,
+    });
+    expect(prompt).toContain("posthog-code://inbox/abc123)");
+  });
 });

@@ -1,18 +1,20 @@
-import { getDeeplinkProtocol } from "@shared/deeplink";
+import { buildInboxDeeplink } from "@shared/deeplink";
 
 interface BuildDiscussReportPromptOptions {
   reportId: string;
+  reportTitle?: string | null;
   question?: string;
   isDevBuild: boolean;
 }
 
 export function buildDiscussReportPrompt({
   reportId,
+  reportTitle,
   question,
   isDevBuild,
 }: BuildDiscussReportPromptOptions): string {
   const trimmedQuestion = question?.trim();
-  const reportLink = `${getDeeplinkProtocol(isDevBuild)}://inbox/${reportId}`;
+  const reportLink = buildInboxDeeplink(reportId, reportTitle, { isDevBuild });
   const intro = `Discuss PostHog inbox report ${reportId} ([inbox item](${reportLink})). Use the inbox MCP tools to fetch the report,`;
   return trimmedQuestion
     ? `${intro} then answer this first: ${trimmedQuestion}`

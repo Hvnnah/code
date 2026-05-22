@@ -106,6 +106,7 @@ export function useDiscussReport({
 
       const prompt = buildDiscussReportPrompt({
         reportId,
+        reportTitle,
         question,
         isDevBuild: import.meta.env.DEV,
       });
